@@ -79,13 +79,27 @@ jobs:
 
         mkdir -p logs
 
-        # Start app with PM2
-        pm2 delete ecommerce-app || true
-        pm2 start ecosystem.config.js --env production
-        pm2 save
+    - name: Start App
+  run: |
+    ssh -o StrictHostKeyChecking=no -i key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+    cd /home/ubuntu/app
 
-        # Configure Nginx to proxy to Node.js
-        sudo bash -c 'cat > /etc/nginx/sites-available/default << EOL
+    # Install dependencies
+    npm install
+
+    # Create .env from GitHub Secrets
+    echo "PORT=3000" > .env
+    echo "SITE_NAME=${{ secrets.SITE_NAME }}" >> .env
+
+    mkdir -p logs
+
+    # Start app with PM2
+    pm2 delete ecommerce-app || true
+    pm2 start ecosystem.config.js --env production
+    pm2 save
+
+    # Configure Nginx to proxy to Node.js
+    sudo bash -c "cat > /etc/nginx/sites-available/default << 'EOL'
 server {
     listen 80;
 
@@ -93,12 +107,12 @@ server {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
         proxy_cache_bypass \$http_upgrade;
     }
 }
-EOL'
+EOL"
 
-        sudo systemctl restart nginx
-        EOF
+    sudo systemctl restart nginx
+EOF
