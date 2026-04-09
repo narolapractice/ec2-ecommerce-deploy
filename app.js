@@ -1,20 +1,19 @@
+// app.js
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-
 const app = express();
 
-const PORT = process.env.PORT || 3000;
-const SITE_NAME = process.env.SITE_NAME || "My Store";
+const port = process.env.PORT || 3000;
 
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve static files from repo root
+app.use(express.static(path.join(__dirname)));
 
-app.get('/api/config', (req, res) => {
-  res.json({
-    siteName: SITE_NAME
-  });
+// Root route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html')); // index.html in root
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Server running on port ${port}`);
 });
