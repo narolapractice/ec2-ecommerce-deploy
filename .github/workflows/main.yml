@@ -9,9 +9,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout the repo
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      # 2️⃣ Configure AWS IAM credentials
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -19,19 +21,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      # 3️⃣ Verify AWS login
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
 
+      # 4️⃣ Setup SSH key
       - name: Setup SSH Key
         run: |
           echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
           chmod 400 key.pem
 
+      # 5️⃣ Prepare EC2 server (install Node, Nginx, PM2)
       - name: Prepare EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
           sudo apt update -y
-
+          
           # Install Node.js
           if ! command -v node > /dev/null
           then
@@ -54,44 +59,51 @@ jobs:
           mkdir -p /home/ubuntu/app
           EOF
 
+      # 6️⃣ Copy repository files to EC2
       - name: Copy Files to EC2
         run: |
           scp -o StrictHostKeyChecking=no -i key.pem -r . ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/ubuntu/app
 
-      - name: Start App
+      # 7️⃣ Install dependencies, start app, configure Nginx
+      - name: Start App and Configure Nginx
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
           cd /home/ubuntu/app
+          
+          # Install dependencies
+          npm install
+          
+          # Create .env from GitHub Secrets
+          echo "PORT=3000" > .env
+          echo "SITE_NAME=${{ secrets.SITE_NAME }}" >> .env
+          
+          # Create logs directory
+          mkdir -p logs
+          
+          # Start Node.js app with PM2
+          pm2 delete ecommerce-app || true
+          pm2 start ecosystem.config.js --env production
+          pm2 save
+          
+          # Configure Nginx as reverse proxy
+          sudo tee /etc/nginx/sites-available/default > /dev/null << 'EOL'
+          server {
+              listen 80;
+          
+              server_name _;
+          
+              location / {
+                  proxy_pass http://localhost:3000;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+              }
+          }
+          EOL
 
-            # Install dependencies
-            npm install
-            
-            # Create .env
-            echo "PORT=3000" > .env
-            echo "SITE_NAME=${{ secrets.SITE_NAME }}" >> .env
-            
-            mkdir -p logs
-            
-            # Start app with PM2
-            pm2 delete ecommerce-app || true
-            pm2 start ecosystem.config.js --env production
-            pm2 save
-            
-            # Configure Nginx
-            sudo tee /etc/nginx/sites-available/default > /dev/null << 'EOL'
-            server {
-                listen 80;
-            
-                location / {
-                    proxy_pass http://localhost:3000;
-                    proxy_http_version 1.1;
-                    proxy_set_header Upgrade $http_upgrade;
-                    proxy_set_header Connection 'upgrade';
-                    proxy_set_header Host $host;
-                    proxy_cache_bypass $http_upgrade;
-                }
-            }
-            EOL
-            
-            sudo systemctl restart nginx
-            EOF
+# Test Nginx config and restart
+sudo nginx -t
+sudo systemctl restart nginx
+EOF
